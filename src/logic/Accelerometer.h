@@ -1,27 +1,31 @@
-#ifndef UNTITLED_ACCELEROMETER_H
-#define UNTITLED_ACCELEROMETER_H
+#ifndef TRACKER_ACCELEROMETER_H
+#define TRACKER_ACCELEROMETER_H
 
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
 #include <Wire.h>
-#include "GY521.h"
 #include "Constants.h"
 
 class Accelerometer {
 public:
     Accelerometer();
 
-    void begin();
+    static bool begin();
 
-    void read();
+    static void
+    read(double *acceleration, int16_t *accelerometer_x, int16_t *accelerometer_y, int16_t *accelerometer_z,
+         int16_t *gyro_x, int16_t *gyro_y,
+         int16_t *gyro_z, int16_t *temperature);
 
     double getAcceleration() const;
 
 private:
     static double square(double a);
 
-    GY521 sensor;
+    Adafruit_MPU6050 mpu;
     float ax = 0, ay = 0, az = 0;
     double acceleration = 0;
 };
 
 
-#endif //UNTITLED_ACCELEROMETER_H
+#endif //TRACKER_ACCELEROMETER_H

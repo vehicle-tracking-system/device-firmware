@@ -2,6 +2,7 @@
 #define TRACKER_STATEMANAGER_H
 
 #include <Arduino.h>
+#include <Preferences.h>
 #include "Constants.h"
 #include <proto/tracker.pb.h>
 #include <queue>
@@ -9,6 +10,10 @@
 
 class StateManager {
 public:
+    explicit StateManager(Preferences &preferences);
+
+    bool begin();
+
     void printCurrentState() const;
 
     void toggleReconnecting();
@@ -23,13 +28,9 @@ public:
 
     bool readConfig();
 
+    bool clearConfig();
+
     String getToken();
-
-    void setToken(String newToken);
-
-    String getUsername();
-
-    String getPassword();
 
     void stopped();
 
@@ -38,15 +39,23 @@ public:
     bool getIsMoving() const;
 
     long getVehicleId() const;
+
+    void generateSessionId();
+
+    uint8_t *getSessionId();
+
 private:
+    Preferences *preferences;
     String username;
     String password;
     String token;
+    uint8_t sessionId[16];
     long vehicleId;
     bool reconnecting = false;
     bool gpsConnected = false;
     bool isMoving = false;
-    std::mutex token_mutex;
+    unsigned int resetCounter;
+    std::mutex state_mutex;
 };
 
 

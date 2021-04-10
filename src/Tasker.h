@@ -1,5 +1,5 @@
-#ifndef BOMBA_TASKER_H
-#define BOMBA_TASKER_H
+#ifndef TRACKER_TASKER_H
+#define TRACKER_TASKER_H
 
 #include <functional>
 #include <vector>
@@ -24,4 +24,4 @@ private:
 extern Tasker DefaultTasker;
 extern Tasker NetworkTasker;
 
-#endif //BOMBA_TASKER_H
+#endif //TRACKER_TASKER_H

@@ -1,2 +1,3 @@
 protocol.Report.positions    max_count:20
 protocol.Report.token        max_size:256
+protocol.Report.sessionId    max_size:16

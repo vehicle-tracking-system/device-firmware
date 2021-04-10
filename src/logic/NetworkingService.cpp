@@ -3,74 +3,21 @@
 
 #include <proto/pb_encode.h>
 
-NetworkingService::NetworkingService(StateManager &stateManager) {
+NetworkingService::NetworkingService(StateManager &stateManager, GSM &gsm) {
     this->stateManager = &stateManager;
+    this->gsm = &gsm;
     this->accelerometer = new Accelerometer();
 }
 
 void NetworkingService::begin() {
+    this->mqttClient = PubSubClient(MQTT_HOST, MQTT_PORT, this->gsm->getSSLClient());
     this->accelerometer->begin();
-}
-
-bool NetworkingService::isModemConnected() {
-    std::lock_guard<std::mutex> lg(modem_mutex);
-    return modem.isNetworkConnected() && modem.isGprsConnected();
+    connectMQTT();
 }
 
 bool NetworkingService::isMqttConnected() {
     std::lock_guard<std::mutex> lg(modem_mutex);
     return mqttClient.connected();
-}
-
-bool NetworkingService::connectToGsm() {
-    std::lock_guard<std::mutex> lg(modem_mutex);
-
-    if (stateManager->isReconnecting()) return false;
-    stateManager->toggleReconnecting();
-
-    Tasker::sleep(55);
-    modem.sleepEnable(false);
-
-    bool modemConnected = false;
-
-    DEBUG_PRINT("Initializing modem...\n", NULL);
-    TinyGsmAutoBaud(SERIALGSM, 9600, 57600);
-
-    if (!modem.init()) {
-        ERROR_PRINT("Modem init failed!!!\n", NULL);
-        // TODO handle
-        return false;
-    }
-
-    DEBUG_PRINT("Modem: %s\n", modem.getModemInfo().c_str());
-
-    Tasker::yield();
-
-    while (!modemConnected) {
-        DEBUG_PRINT("Waiting for network...", NULL);
-        if (!modem.waitForNetwork()) {
-            ERROR_PRINT(" fail\n", NULL);
-            Tasker::yield();
-            continue;
-        }
-        DEBUG_PRINT(" OK\n", NULL);
-        Tasker::yield();
-
-        DEBUG_PRINT("Connecting to %s", APN_HOST);
-
-        if (!modem.gprsConnect(APN_HOST, APN_USER, APN_PASS)) {
-            ERROR_PRINT(" fail\n", NULL);
-            Tasker::yield();
-            continue;
-        }
-        Tasker::yield();
-
-        modemConnected = true;
-        DEBUG_PRINT(" OK\n", NULL);
-    }
-
-    stateManager->toggleReconnecting();
-    return true;
 }
 
 void NetworkingService::connectMQTT() {
@@ -86,7 +33,7 @@ void NetworkingService::connectMQTT() {
     while (!mqttClient.connected()) {
         Tasker::yield();
         // Create a random client ID
-        String clientId = "ESPClient-";
+        String clientId = "TRACKER-";
         clientId += String(random(0xffff), HEX);
         // Attempt to connect
         DEBUG_PRINT("Attempting MQTT connection...", NULL);
@@ -103,86 +50,13 @@ void NetworkingService::connectMQTT() {
     stateManager->toggleReconnecting();
 }
 
-bool NetworkingService::connectToGps() {
-    std::lock_guard<std::mutex> lg(modem_mutex);
-    if (stateManager->isReconnecting()) return false;
-    stateManager->toggleReconnecting();
-
-    if (!modem.enableGPS()) {
-        ERROR_PRINT("GPS error.\n", NULL);
-        return false;
-    }
-
-    DEBUG_PRINT("GPS enabled. Waiting for signal...\n", NULL);
-    float lat, lon, speed, alt, accuracy;
-    int vsat, usat;
-    while (!modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy)) {
-        Tasker::sleep(1000);
-    }
-
-    kalmanFilter->SetState(lat, lon, accuracy, millis());
-
-    DEBUG_PRINT("GPS position fixed: %f %f\n", lat, lon);
-
-    return true;
-}
-
 bool NetworkingService::getCurrentPosition() {
-    if (!isModemConnected()) return false;
-    accelerometer->read();
-    std::lock_guard<std::mutex> lg(modem_mutex);
-    DEBUG_PRINT("Getting current position...\n", NULL);
-    float lat, lon, speed, alt, accuracy;
-    int vsat, usat, year, month, day, hour, minute, second;
-    if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy, &year, &month, &day, &hour, &minute, &second)) {
-        DEBUG_PRINT("Acceleration: %f\n", accelerometer->getAcceleration());
-        kalmanFilter->Process(lat, lon, accuracy, millis());
-        DEBUG_PRINT("KALMAN lat: %f, lng: %f\n", kalmanFilter->get_lat(), kalmanFilter->get_lng());
-        DEBUG_PRINT("REAL   lat: %f, lng: %f\n", lat, lon);
-        if (speed < SPEED_LOWER_LIMIT || speed > SPEED_UPPER_LIMIT) {
-            // Speed is to slow or high to be relevant
-            DEBUG_PRINT("Speed (%f) is to slow or high to be relevant. Accuracy: %f\n", speed, accuracy);
-            return false;
-        }
-        // TODO neco lepsiho ??
-        if (accuracy > 4) {
-            DEBUG_PRINT("Accuracy is to low: %f, using GSM position\n", accuracy);
-            // TOHLE SPADNE, TAK MAM SMULU :-(
-//            modem.getGsmLocation(&lat, &lon, &accuracy, &year, &month, &day, &hour, &minute, &second);
-            return false;
-        }
-        std::lock_guard<std::mutex> bg(buffer_mutex);
-        struct tm t;
-        time_t time;
-        t.tm_year = year - 1900;
-        t.tm_mon = month - 1;
-        t.tm_mday = day;
-        t.tm_hour = hour;
-        t.tm_min = minute;
-        t.tm_sec = second;
-        t.tm_isdst = -1;
-        time = mktime(&t);
-
-        DEBUG_PRINT("Act position at %d:%d:%d is %f %f, speed: %f, timestamp: %lu, accuracy: %f\n", hour, minute,
-                    second, lat, lon,
-                    speed, time, accuracy);
-        _protocol_TrackerPosition position = protocol_TrackerPosition_init_zero;
-        position.speed = speed;
-        position.latitude = lat;
-        position.longitude = lon;
-        position.timestamp = time;
-        position.track = 1;
-        position.vehicleId = stateManager->getVehicleId();
-        positionBuffer.push(position);
-        return true;
-    } else {
-        DEBUG_PRINT("GPS position not fixed\n", NULL);
-        return false;
-    }
+    _protocol_TrackerPosition position = protocol_TrackerPosition_init_zero;
+    positionBuffer.push(position);
 }
 
 bool NetworkingService::sendReport() {
-    if (!(isModemConnected() && isMqttConnected())) {
+    if (!(gsm->isModemConnected() && isMqttConnected())) {
         ERROR_PRINT("Not connected - could not report state\n", NULL);
         reconnect();
         return false;
@@ -212,23 +86,21 @@ bool NetworkingService::sendReport() {
 }
 
 bool NetworkingService::reconnect() {
-    while (!(isModemConnected() && isMqttConnected())) {
-        if (!isModemConnected()) {
+    while (!(gsm->isModemConnected() && isMqttConnected())) {
+        if (!gsm->isModemConnected()) {
             DEBUG_PRINT("Reconnecting modem...\n", NULL);
             Tasker::yield();
-            if (!this->connectToGsm()) {
-                return false;
-            }
+            if (!gsm->reconnect()) return false;
         }
 
-        if (this->connectToGsm() && !this->isMqttConnected()) {
+        if (!this->isMqttConnected()) {
             DEBUG_PRINT("Reconnecting MQTT...\n", NULL);
             Tasker::yield();
             this->connectMQTT();
         }
     }
 
-    return isModemConnected() && isMqttConnected();
+    return gsm->isModemConnected() && isMqttConnected();
 }
 
 void NetworkingService::retrySendReport() {
@@ -255,6 +127,10 @@ int NetworkingService::buildReport(_protocol_Report *report) {
 
     strcpy(report->token, stateManager->getToken().c_str());
     report->isMoving = true;
+    report->vehicleId = this->stateManager->getVehicleId();
+    memcpy(&report->sessionId.bytes, this->stateManager->getSessionId(), 16);
+    report->sessionId.size = 16;
+
     int positionsToWrite = 0;
 
     std::lock_guard<std::mutex> lg(buffer_mutex);
@@ -286,5 +162,16 @@ bool NetworkingService::sendToMqtt(_protocol_Report *report) {
     std::lock_guard<std::mutex> lg(modem_mutex);
     bool published = mqttClient.publish(MQTT_TOPIC, buffer, message_length, true);
     DEBUG_PRINT("Publish %d bytes to MQTT end with result: %d\n", message_length, published);
+    return true;
+}
+
+bool NetworkingService::enqueueNewPosition() {
+    _protocol_TrackerPosition position = protocol_TrackerPosition_init_zero;
+    if (!this->gsm->getCurrentPosition(&position)) {
+        ERROR_PRINT("Enqueue new position error\n", NULL);
+        return false;
+    }
+    std::lock_guard<std::mutex> lg(modem_mutex);
+    positionBuffer.push(position);
     return true;
 }

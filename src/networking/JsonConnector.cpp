@@ -26,13 +26,16 @@ void JsonConnector::onWsEvent(AwsEventType type, uint8_t *data, size_t len) {
 
         StaticJsonDocument<1024> json;
         deserializeJson(json, data, len);
-
+        uint8_t test[2048];
+        serializeJson(json, test, 2048);
+        DEBUG_PRINT("%s\n", test);
         for (auto &callback : callbacks)
             callback(json);
     }
 }
 
 void JsonConnector::subscribe(const std::function<void(const JsonDocument &)> &callback) {
+    DEBUG_PRINT("New subscription\n", NULL);
     callbacks.push_back(callback);
 }
 

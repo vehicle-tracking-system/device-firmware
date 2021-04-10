@@ -13,11 +13,11 @@ public:
 
     void begin(JsonConnector &jsonConnector);
 
+    void stop();
+
 private:
     AsyncWebServer *webServer;
     bool send = false;
-
-    void installCaptivePortalRedirects();
 
     static bool handleStaticFile(AsyncWebServerRequest *request) {
         String path = STATIC_FILES_PREFIX + request->url();
@@ -81,8 +81,6 @@ private:
 
         return F("text/plain");
     }
-
-    void registerWebsocketConfigurationReceiver();
 };
 
 

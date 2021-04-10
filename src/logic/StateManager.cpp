@@ -2,6 +2,27 @@
 
 #include <utility>
 
+StateManager::StateManager(Preferences &preferences) {
+    this->preferences = &preferences;
+}
+
+bool StateManager::begin() {
+    resetCounter = preferences->getUInt("resets", 0);
+    DEBUG_PRINT("Total resets: %u\n", resetCounter);
+    if (resetCounter >= 4) {
+        clearConfig();
+        return true;
+    }
+    preferences->putUInt("resets", resetCounter + 1);
+    DefaultTasker.once("resetcnt", [this]() {
+        Tasker::sleep(10000);
+        DEBUG_PRINT("Resetting counter of resets!\n", NULL);
+        preferences->putUInt("resets", 0);
+    });
+    generateSessionId();
+    readConfig();
+}
+
 void StateManager::printCurrentState() const {
     Serial.printf(
             "Reconnecting = %d Username = %s Password = %s\n",
@@ -10,6 +31,7 @@ void StateManager::printCurrentState() const {
 }
 
 void StateManager::toggleReconnecting() {
+    std::lock_guard<std::mutex> lg(state_mutex);
     this->reconnecting = !this->reconnecting;
 }
 
@@ -18,35 +40,20 @@ bool StateManager::isReconnecting() const {
 }
 
 bool StateManager::readConfig() {
-    File file = SPIFFS.open("/config.txt", "r");
-    if (!file.available()) {
-        DEBUG_PRINT("Config file can not be open for reading\n", NULL);
-        file.close();
-        return false;
-    }
-    this->username = file.readStringUntil('\r');
-    file.read();
-    this->password = file.readStringUntil('\r');
-    file.read();
-    this->token = file.readStringUntil('\r');
-    file.read();
-    this->vehicleId = file.readStringUntil('\r').toInt();
-    DEBUG_PRINT("Config:\n\tusername: %s\n\tpassword: %s\n\ttoken: %s\n\tvehicleId: %lu\n", this->username.c_str(),
-                this->password.c_str(), this->token.c_str(), this->vehicleId);
-    file.close();
-    return true;
+    std::lock_guard<std::mutex> lg(state_mutex);
+
+    this->token = preferences->getString("token", "N/A");
+    this->vehicleId = preferences->getLong("vehicleId", -1);
+    DEBUG_PRINT("Config:\n\ttoken: %s\n\tvehicleId: %lu\n", token.c_str(), vehicleId);
+    return !((token == "N/A") | (vehicleId == -1));
 }
 
 String StateManager::getToken() {
     return this->token;
 }
 
-void StateManager::setToken(String newToken) {
-    std::lock_guard<std::mutex> lg(token_mutex);
-    token = std::move(newToken);
-}
-
 void StateManager::toggleGpsConnected() {
+    std::lock_guard<std::mutex> lg(state_mutex);
     this->gpsConnected = !this->gpsConnected;
 }
 
@@ -56,15 +63,6 @@ bool StateManager::isGpsConnected() const {
 
 void StateManager::setGpsState(bool state) {
     this->gpsConnected = state;
-
-}
-
-String StateManager::getUsername() {
-    return this->username;
-}
-
-String StateManager::getPassword() {
-    return this->password;
 }
 
 void StateManager::stopped() {
@@ -81,4 +79,18 @@ long StateManager::getVehicleId() const {
 
 bool StateManager::getIsMoving() const {
     return this->isMoving;
+}
+
+uint8_t *StateManager::getSessionId() {
+    return this->sessionId;
+}
+
+void StateManager::generateSessionId() {
+    std::lock_guard<std::mutex> lg(state_mutex);
+    esp_fill_random(this->sessionId, 16);
+}
+
+bool StateManager::clearConfig() {
+    std::lock_guard<std::mutex> lg(state_mutex);
+    return preferences->clear();
 }

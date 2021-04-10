@@ -6,6 +6,9 @@ class AP {
 public:
     static void begin(const char *ssid, const char *password);
 
+    /**
+     * Stop AP and WiFi
+     * */
     static void stop();
 };
 

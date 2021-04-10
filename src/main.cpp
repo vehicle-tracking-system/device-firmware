@@ -1,89 +1,68 @@
 #include <Arduino.h>
 
+#include <Preferences.h>
 #include "Constants.h"
 #include <logic/NetworkingService.h>
 #include <networking/WebServer.h>
 #include <networking/AP.h>
 
-StateManager stateManager;
-NetworkingService mqttService(stateManager);
+Preferences preferences;
+StateManager stateManager(preferences);
+GSM gsm(stateManager);
+NetworkingService networkingService(stateManager, gsm);
 WebServer webServer;
 JsonConnector jsonConnector;
 
+// return in setup function can stop all tasks run from there!
 void setup() {
     Serial.begin(115200);
-
-    DEBUG_PRINT("Initializing...\n", NULL);
-
-    mqttService.begin();
-
     if (!FileSystem.begin()) {
         ERROR_PRINT("Could not init FS\n", NULL);
-//        return;
     }
+    DEBUG_PRINT("Initializing...\n", NULL);
+    preferences.begin("tracker", false);
+    stateManager.begin();
+//    stateManager.generateSessionId(); // generate new random byte array
 
+    // start webserver
     NetworkTasker.once("ap-server", [] {
         AP::begin(WIFI_SSID, WIFI_PASSWORD);
         webServer.begin(jsonConnector);
     });
 
-    if (!stateManager.readConfig()) {
-        ERROR_PRINT("Configuration file error!!!\n", NULL);
-//        return;
-    }
-
-    if (mqttService.connectToGsm()) {
-        mqttService.connectMQTT();
-    } else {
-        ERROR_PRINT("Could not connect to GSM!!!\n", NULL);
-        return;
-    }
-
-    mqttService.connectToGps();
-
-    DEBUG_PRINT("Starting the app...\n", NULL);
-
-    DefaultTasker.loopEvery("get-position", 2000, [] {
-        mqttService.getCurrentPosition();
-    });
-
-    DefaultTasker.loopEvery("send-report", 10000, [] {
-        if (!mqttService.sendReport()) {
-            ERROR_PRINT("Send report failed!!!\n", NULL);
-        }
+    // turn off wifi AP and webserver after timeout
+    NetworkTasker.once("ap-off", [] {
+        DEBUG_PRINT("Registering promise to turn off AP...\n", NULL);
+        Tasker::sleep(120000);
+        DEBUG_PRINT("Turning off AP...\n", NULL);
+        AP::stop();
+        webServer.stop();
     });
 
     jsonConnector.subscribe([](const JsonDocument &json) {
         DEBUG_PRINT("Configuration JSON received\n", NULL);
-        File file = SPIFFS.open("/config.txt", "w+");
-        if (!file) {
-            ERROR_PRINT("Error opening config file for writing\n", NULL);
-            return;
+        preferences.putString("token", json["token"].as<char *>());
+        preferences.putLong("vehicleId", json["vehicleId"].as<long>());
+    });
+
+    gsm.begin();
+    networkingService.begin();
+
+    DEBUG_PRINT("Starting the app...\n", NULL);
+
+    // read new position to buffer from GPS
+    DefaultTasker.loopEvery("get-position", POSITION_FREQUENCE, [] {
+        networkingService.enqueueNewPosition();
+    });
+
+    // send report with positions to MQTT broker
+    DefaultTasker.loopEvery("send-report", REPORT_FREQUENCE, [] {
+        if (!networkingService.sendReport()) {
+            ERROR_PRINT("Send report failed!!!\n", NULL);
         }
-        int usernameBytesWritten = file.println(json["username"].as<char *>());
-        int passwordBytesWritten = file.println(json["password"].as<char *>());
-        int tokenBytesWritten = file.println(json["token"].as<char *>());
-        file.println(json["vehicleId"].as<long>());
-
-        if (usernameBytesWritten > 0 && passwordBytesWritten > 0 && tokenBytesWritten > 0) {
-            DEBUG_PRINT(
-                    "%d bytes of username and %d bytes of password and %d bytes of access token was written to config file\n",
-                    usernameBytesWritten, passwordBytesWritten, tokenBytesWritten);
-
-        } else {
-            ERROR_PRINT("Write to config file failed!\n", NULL);
-        }
-
-        file.close();
     });
 
     DEBUG_PRINT("Startup finished!\n", NULL);
-
-    NetworkTasker.once("ap-off", [] {
-        Tasker::sleep(120000);
-        DEBUG_PRINT("Turning off AP...\n", NULL);
-        AP::stop();
-    });
 
 }
 
