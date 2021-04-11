@@ -2,14 +2,14 @@
 
 #include <Preferences.h>
 #include "Constants.h"
-#include <logic/NetworkingService.h>
+#include <logic/StateManager.h>
+#include <logic/GSM.h>
 #include <networking/WebServer.h>
 #include <networking/AP.h>
 
 Preferences preferences;
 StateManager stateManager(preferences);
 GSM gsm(stateManager);
-NetworkingService networkingService(stateManager, gsm);
 WebServer webServer;
 JsonConnector jsonConnector;
 
@@ -22,7 +22,6 @@ void setup() {
     DEBUG_PRINT("Initializing...\n", NULL);
     preferences.begin("tracker", false);
     stateManager.begin();
-//    stateManager.generateSessionId(); // generate new random byte array
 
     // start webserver
     NetworkTasker.once("ap-server", [] {
@@ -45,19 +44,21 @@ void setup() {
         preferences.putLong("vehicleId", json["vehicleId"].as<long>());
     });
 
-    gsm.begin();
-    networkingService.begin();
+    if (!gsm.begin()) {
+        ERROR_PRINT("GSM initialization failed! Check wiring and reset.\n", NULL);
+        return;
+    }
 
     DEBUG_PRINT("Starting the app...\n", NULL);
 
     // read new position to buffer from GPS
     DefaultTasker.loopEvery("get-position", POSITION_FREQUENCE, [] {
-        networkingService.enqueueNewPosition();
+        gsm.enqueueNewPosition();
     });
 
     // send report with positions to MQTT broker
     DefaultTasker.loopEvery("send-report", REPORT_FREQUENCE, [] {
-        if (!networkingService.sendReport()) {
+        if (!gsm.sendReport()) {
             ERROR_PRINT("Send report failed!!!\n", NULL);
         }
     });

@@ -6,22 +6,21 @@ GSM::GSM(StateManager &stateManager) {
 
 bool GSM::begin() {
     if (!connectToGSM()) return false;
+    connectToMQTT();
     if (!connectToGPS()) return false;
     return true;
 }
 
 bool GSM::isModemConnected() {
-    std::lock_guard<std::mutex> lg(modem_mutex);
+    std::lock_guard<std::mutex> lg(gsm_mutex);
     return modem.isNetworkConnected() && modem.isGprsConnected();
 }
 
 bool GSM::connectToGSM() {
-    std::lock_guard<std::mutex> lg(modem_mutex);
-
+    std::lock_guard<std::mutex> lg(gsm_mutex);
     if (stateManager->isReconnecting()) return false;
     stateManager->toggleReconnecting();
 
-    Tasker::sleep(55);
     modem.sleepEnable(false);
 
     bool modemConnected = false;
@@ -67,12 +66,15 @@ bool GSM::connectToGSM() {
 }
 
 bool GSM::getCurrentPosition(_protocol_TrackerPosition *position) {
-    if (!isModemConnected()) return false;
-    std::lock_guard<std::mutex> lg(modem_mutex);
+    if (!isModemConnected()) {
+        ERROR_PRINT("Modem is not connected\n", NULL);
+        return false;
+    }
     DEBUG_PRINT("Getting current position...\n", NULL);
     float lat, lon, speed, alt, accuracy;
     int vsat, usat;
     tm rawTime = {};
+    std::lock_guard<std::mutex> lg(gsm_mutex);
     if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy, &rawTime.tm_year, &rawTime.tm_mon,
                      &rawTime.tm_mday, &rawTime.tm_hour, &rawTime.tm_min, &rawTime.tm_sec)) {
         DEBUG_PRINT("REAL   lat: %f, lng: %f\n", lat, lon);
@@ -109,12 +111,8 @@ bool GSM::getCurrentPosition(_protocol_TrackerPosition *position) {
     }
 }
 
-SSLClient &GSM::getSSLClient() {
-    return this->gsmClientSSL;
-}
-
 bool GSM::connectToGPS() {
-    std::lock_guard<std::mutex> lg(modem_mutex);
+    std::lock_guard<std::mutex> lg(gsm_mutex);
     if (stateManager->isReconnecting()) return false;
     stateManager->toggleReconnecting();
 
@@ -132,15 +130,163 @@ bool GSM::connectToGPS() {
     this->stateManager->setGpsState(true);
     DEBUG_PRINT("GPS position fixed: %f %f\n", lat, lon);
 
+    stateManager->toggleReconnecting();
     return true;
 }
 
 bool GSM::reconnect() {
-    DEBUG_PRINT("Reconnecting modem...\n", NULL);
-    Tasker::yield();
-    if (!this->connectToGSM()) {
-        ERROR_PRINT("Reconnecting modem failed... Check wiring\n", NULL);
+    while (!(isModemConnected() && isMqttConnected())) {
+        if (!isModemConnected()) {
+            DEBUG_PRINT("Reconnecting modem...\n", NULL);
+            Tasker::yield();
+            if (!connectToGSM()) {
+                return false;
+            }
+        }
+
+        if (connectToGSM() && !isMqttConnected()) {
+            DEBUG_PRINT("Reconnecting MQTT...\n", NULL);
+            Tasker::yield();
+            this->connectToMQTT();
+        }
+    }
+
+    return isModemConnected() && isMqttConnected();
+}
+
+bool GSM::isMqttConnected() {
+    std::lock_guard<std::mutex> lg(gsm_mutex);
+    return mqttClient.connected();
+}
+
+void GSM::connectToMQTT() {
+    std::lock_guard<std::mutex> lg(gsm_mutex);
+
+    if (stateManager->isReconnecting()) return;
+    stateManager->toggleReconnecting();
+
+    mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+    mqttClient.setKeepAlive(300);
+
+    // Loop until we're reconnected
+    while (!mqttClient.connected()) {
+        Tasker::yield();
+        // Create a random client ID
+        String clientId = "TRACKER-";
+        clientId += String(random(0xffff), HEX);
+        // Attempt to connect
+        DEBUG_PRINT("Attempting MQTT connection...", NULL);
+        mqttClient.disconnect();
+        if (mqttClient.connect(clientId.c_str())) {
+            DEBUG_PRINT(" connected to %s\n", MQTT_HOST);
+        } else {
+            ERROR_PRINT("failed, rc=%d try again in 5 seconds\n", mqttClient.state());
+            // Wait 5 seconds before retrying
+            Tasker::sleep(5000);
+        }
+    }
+
+    stateManager->toggleReconnecting();
+}
+
+void GSM::retrySendReport() {
+    std::lock_guard<std::mutex> lg(report_buffer_mutex);
+    if (reportBuffer.empty()) return;
+    _protocol_Report report = reportBuffer.front();
+    if (sendToMqtt(&report)) {
+        reportBuffer.pop();
+    } else {
+        DefaultTasker.once("resend-again", [this] {
+            Tasker::sleep(500);
+            retrySendReport();
+        });
+        ERROR_PRINT("Error resend report via MQTT\n", NULL);
+    }
+}
+
+bool GSM::sendToMqtt(_protocol_Report *report) {
+    uint8_t buffer[1024];
+    size_t message_length;
+    pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+    bool status = pb_encode(&stream, protocol_Report_fields, report);
+
+    if (!status) {
+        ERROR_PRINT("Could not encode status report!", NULL);
         return false;
     }
-    return isModemConnected();
+
+    message_length = stream.bytes_written;
+    std::lock_guard<std::mutex> lg(gsm_mutex);
+    bool published = mqttClient.publish(MQTT_TOPIC, buffer, message_length, true);
+    DEBUG_PRINT("Publish %d bytes to MQTT end with result: %d\n", message_length, published);
+    return true;
+}
+
+bool GSM::sendReport() {
+    if (!(isModemConnected() && isMqttConnected())) {
+        ERROR_PRINT("Not connected - could not report state\n", NULL);
+        reconnect();
+        return false;
+    }
+    DEBUG_PRINT("Sending report...\n", NULL);
+
+    _protocol_Report report = protocol_Report_init_zero;
+    int positionsToWrite = buildReport(&report);
+    DEBUG_PRINT("Positions to write: %d\n", report.positions_count);
+    if (positionsToWrite == 0) {
+        DEBUG_PRINT("Nothing to send\n", NULL);
+        return true;
+    }
+
+    bool published = sendToMqtt(&report);
+    DEBUG_PRINT("IsPublished: %d\n", published);
+    if (!published) {
+        std::lock_guard<std::mutex> lg(report_buffer_mutex);
+        this->reportBuffer.push(report);
+        DefaultTasker.once("resend", [this] {
+            Tasker::sleep(500);
+            retrySendReport();
+        });
+        return false;
+    }
+    return true;
+}
+
+int GSM::buildReport(_protocol_Report *report) {
+    DEBUG_PRINT("Building report...\n", NULL);
+    {
+        std::lock_guard<std::mutex> lg(buffer_mutex);
+        if (this->positionBuffer.empty()) return 0;
+    }
+
+    strcpy(report->token, stateManager->getToken().c_str());
+    report->isMoving = true;
+    report->vehicleId = this->stateManager->getVehicleId();
+    memcpy(&report->sessionId.bytes, this->stateManager->getSessionId(), 16);
+    report->sessionId.size = 16;
+
+    int positionsToWrite = 0;
+
+    std::lock_guard<std::mutex> lg(buffer_mutex);
+    for (auto &p : report->positions) {
+        if (this->positionBuffer.empty()) break;
+        _protocol_TrackerPosition position = this->positionBuffer.front();
+        this->positionBuffer.pop();
+        p = position;
+        positionsToWrite++;
+    }
+
+    report->positions_count = positionsToWrite;
+    DEBUG_PRINT("Report build: positions to write: %d\n", report->positions_count);
+    return positionsToWrite;
+}
+
+bool GSM::enqueueNewPosition() {
+    _protocol_TrackerPosition position = protocol_TrackerPosition_init_zero;
+    if (!this->getCurrentPosition(&position)) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lg(buffer_mutex);
+    positionBuffer.push(position);
+    return true;
 }

@@ -7,6 +7,8 @@
 #include <TinyGsmClient.h>
 #include <mutex>
 #include <SSLClient/SSLClient.h>
+#include <PubSubClient.h>
+#include <proto/pb_encode.h>
 #include "StateManager.h"
 
 /**
@@ -23,6 +25,8 @@ public:
     bool begin();
 
     /**
+     * This function is not synchronized.
+     *
      * @return true if modem is connected to network and GPRS, otherwise false
      * */
     bool isModemConnected();
@@ -35,14 +39,38 @@ public:
     bool getCurrentPosition(_protocol_TrackerPosition *trackerPosition);
 
     /**
-     *  Reconnect to GSM network and Internet
+     * Restore GSM and MQTT connection
+     *
+     * @return true if reconnection was successful, otherwise false
      * */
     bool reconnect();
 
     /**
-     * @return GSM client wrapped in SSL.
+     * @return true if connected to MQTT, otherwise false
      * */
-    SSLClient &getSSLClient();
+    bool isMqttConnected();
+
+    /**
+     * Build report from position in buffer.
+     *
+     * @return number of positions inside report
+     * */
+    int buildReport(_protocol_Report *report);
+
+    /**
+     * Send report to (prepared with `buildReport`) MQTT broker.
+     * If sending failed, resend is handle internally.
+     *
+     * @return true if report was send successfully, otherwise false
+     * */
+    bool sendReport();
+
+    /**
+     * Read new position from GSM and enqueue it to buffer.
+     *
+     * @return true if position was successfully read and push to buffer queue
+     * */
+    bool enqueueNewPosition();
 
 private:
     /**
@@ -61,11 +89,26 @@ private:
      * */
     bool connectToGPS();
 
+    /**
+    * Connect to MQTT with random client ID (prefixed with `TRACKER-`).
+    * This function is blocking. Waiting until connect to MQTT broker.
+    * */
+    void connectToMQTT();
+
+    void retrySendReport();
+
+    bool sendToMqtt(_protocol_Report *report);
+
     StateManager *stateManager;
     TinyGsm modem = TinyGsm(SERIALGSM);
     TinyGsmClient gsmClient = TinyGsmClient(modem);
     SSLClient gsmClientSSL = SSLClient(&gsmClient);
-    std::mutex modem_mutex;
+    PubSubClient mqttClient = PubSubClient(MQTT_HOST, MQTT_PORT, gsmClientSSL);
+    std::queue<_protocol_TrackerPosition> positionBuffer;
+    std::queue<_protocol_Report> reportBuffer;
+    std::mutex gsm_mutex; // everything integrating with gsm module (mqttClient, gsmClient, gsmClientSSL) must be synchronized!
+    std::mutex report_buffer_mutex;
+    std::mutex buffer_mutex;
 };
 
 #endif //TRACKER_GSM_H
