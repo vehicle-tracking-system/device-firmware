@@ -55,6 +55,10 @@ SPEED_UPPER_LIMIT | data from GPS with higher speed then this threshold will be 
 
 Variables above allows to modify just technical aspects of tracker. The configuration and pairing with backend is done by the UI. This is the reason why tracker needs to configure WiFi SSID and password. Connect to WiFi broadcast by tracker (`WIFI_SSID`). Once you will be connected, you can type `tracker.local` into address line in your browser. User interface will appear and you'll be prompted to upload configuration file. You can generate a configuration file in the web administration (more info here: *TO DO*). 
 ## Build
-For proper functioning `PlatformIO` framework is required!
+A `PlatformIO` framework is required for the code to work properly!
 
 There is `upload-all.sh` build script that compile whole code and uploads it to ESP (ports can be changed in `platformio.ini`)
+
+## Wiring
+
+![Wiring](/schem.pdf)
