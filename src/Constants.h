@@ -4,7 +4,7 @@
 #include <FS.h>
 #include <SPIFFS.h>
 
-#include "Tasker.h"
+#include "../lib/Tasker/Tasker.h"
 
 //
 // MESSAGE LEVELS
@@ -29,30 +29,48 @@
 #define ERROR_PRINT(x, ...)
 #endif
 
-const int MPU_ADDR = 0x68;
+#define AP_AUTO_OFF
+#define USE_ACCELEROMETER // IF DEFINED, TRACKER RECOGNIZE MOVEMENT USING ACCELEROMETER
+//#define WIFI_MODE // IF DEFINED, TRACKER CONNECT YOURSELF TO WIFI INSTEAD CREATING AP
 
-const int POSITION_FREQUENCE = 4000; // ms
-const int REPORT_FREQUENCE = 5 * POSITION_FREQUENCE; // ms
+static const char WIFI_MODE_SSID[] = "";
+static const char WIFI_MODE_PASS[] = "";
 
-static char MQTT_HOST[] = "mqtt.dev.jehlicka.eu";
-static int MQTT_PORT = 8883;
-static char MQTT_TOPIC[] = "sledovac-dev";
+static const int MPU_ADDR = 0x69;
+static const int MOVEMENT_THRESHOLD = 3000;
 
-const char APN_HOST[] = "internet.t-mobile.cz";
-const char APN_USER[] = "";
-const char APN_PASS[] = "";
+static const int POWER_PIN = 5;
 
-static char WIFI_SSID[] = "tracker";
-static char WIFI_PASSWORD[] = "12345678";
+static const int RED_LED_PIN = 26;
+static const int GREEN_LED_PIN = 25;
 
-static char STATIC_FILES_PREFIX[] = "/w";
-static int HTTP_PORT = 80;
-static int DNS_PORT = 53;
-static char WEBSOCKET_PATH[] = "/ws";
+static const int POSITION_FREQUENCE = 3000; // ms
+static const int POSITIONS_IN_REPORT = 5;
+static const int REPORT_FREQUENCE = POSITIONS_IN_REPORT * POSITION_FREQUENCE; // ms
 
-static float MINIMAL_ACCURACY = 3.0;
-static float SPEED_LOWER_LIMIT = 3.0;
-static float SPEED_UPPER_LIMIT = 200.0;
+static const double MAX_DISTANCE_BETWEEN_TWO_POSITIONS = round(200 / 3.6) * POSITIONS_IN_REPORT;
+
+//static const char MQTT_HOST[] = "m.dev.jehlicka.eu";
+//static const int MQTT_PORT = 8883;
+//static const char MQTT_TOPIC[] = "sledovac-dev";
+//static const char MQTT_USERNAME[] = "tracker";
+//static const char MQTT_PASSWORD[] = "tracker";
+
+//static const char APN_HOST[] = "internet.t-mobile.cz";
+//static const char APN_USER[] = "";
+//static const char APN_PASS[] = "";
+
+static const char WIFI_SSID[] = "tracker";
+static const char WIFI_PASSWORD[] = "12345678";
+
+static const char STATIC_FILES_PREFIX[] = "/w";
+static const int HTTP_PORT = 80;
+static const int DNS_PORT = 53;
+static const char WEBSOCKET_PATH[] = "/ws";
+
+static const float MINIMAL_ACCURACY = 3.0;
+static const float SPEED_LOWER_LIMIT = 5.0;
+static const float SPEED_UPPER_LIMIT = 200.0;
 
 #define FileSystem SPIFFS
 

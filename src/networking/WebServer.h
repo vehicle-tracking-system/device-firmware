@@ -1,8 +1,9 @@
+//Inspired by: https://github.com/jendakol/bomb-game/blob/0c25175c45a22eec3f1b15a869de26f3343957da/src/networking/WebServer.h
 #ifndef TRACKER_WEBSERVER_H
 #define TRACKER_WEBSERVER_H
 
 #include <vector>
-#include <ESPAsyncWebServer.h> // this is universal over ESP32/ESP8266
+#include <ESPAsyncWebServer.h>
 
 #include "JsonConnector.h"
 #include <Constants.h>
@@ -37,8 +38,7 @@ private:
 
             File file = FileSystem.open(path, "r");
 
-            Serial.println(
-                    "Serving static file, path=" + path + " size=" + file.size() + " content-type=" + contentType);
+            DEBUG_PRINT("Serving static file, path=%s size=%d content-type=%s", path, file.size(), contentType);
 
             AsyncWebServerResponse *response = request->beginResponse(
                     contentType,

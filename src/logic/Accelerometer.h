@@ -5,25 +5,27 @@
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
 #include "Constants.h"
+#include "StateManager.h"
 
 class Accelerometer {
 public:
-    Accelerometer();
+    explicit Accelerometer(StateManager &stateManager);
 
-    static bool begin();
+    /**
+     * Initialize communication with accelerometer via I2C bus.
+     * @return true if initialization was successful, otherwise false
+     */
+    bool begin();
 
-    static void
-    read(double *acceleration, int16_t *accelerometer_x, int16_t *accelerometer_y, int16_t *accelerometer_z,
-         int16_t *gyro_x, int16_t *gyro_y,
-         int16_t *gyro_z, int16_t *temperature);
-
-    double getAcceleration() const;
+    /**
+     * Read data from accelerometer and save them to the state manager.
+     * @return true if data read successfully, otherwise false
+     */
+    bool updateAcceleration();
 
 private:
-    static double square(double a);
-
-    Adafruit_MPU6050 mpu;
-    float ax = 0, ay = 0, az = 0;
+    StateManager *stateManager;
+    int counter = 0;
     double acceleration = 0;
 };
 

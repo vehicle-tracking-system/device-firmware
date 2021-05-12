@@ -1,3 +1,4 @@
+//Inspired by: https://github.com/jendakol/bomb-game/blob/0c25175c45a22eec3f1b15a869de26f3343957da/src/networking/JsonConnector.cpp
 #include "JsonConnector.h"
 
 #include <Constants.h>
@@ -41,5 +42,7 @@ void JsonConnector::subscribe(const std::function<void(const JsonDocument &)> &c
 
 void JsonConnector::send(const JsonDocument &json) {
     size_t len = serializeJson(json, buff);
-    webSocket->textAll(buff, len);
+    this->webSocket->cleanupClients();
+    if(this->webSocket->count())
+        webSocket->textAll(buff, len);
 }

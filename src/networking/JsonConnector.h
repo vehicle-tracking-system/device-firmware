@@ -1,3 +1,4 @@
+//Inspired by: https://github.com/jendakol/bomb-game/blob/0c25175c45a22eec3f1b15a869de26f3343957da/src/networking/JsonConnector.h
 #ifndef TRACKER_JSONCONNECTOR_H
 #define TRACKER_JSONCONNECTOR_H
 

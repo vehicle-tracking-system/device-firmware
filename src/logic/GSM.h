@@ -6,10 +6,11 @@
 
 #include <TinyGsmClient.h>
 #include <mutex>
-#include <SSLClient/SSLClient.h>
+#include <SSLClient.h>
 #include <PubSubClient.h>
 #include <proto/pb_encode.h>
 #include "StateManager.h"
+#include "LedController.h"
 
 /**
  * Providing API for communication with SIM808 (GSM/GPS) module.
@@ -73,6 +74,10 @@ public:
     bool enqueueNewPosition();
 
 private:
+    static void startGSM();
+
+    static void restartGSM();
+
     /**
      * Connect module to GSM network.
      * This function is blocking. Waiting until GSM module to connect to network.
@@ -99,14 +104,16 @@ private:
 
     bool sendToMqtt(_protocol_Report *report);
 
+    double deg2rad(double deg);
+
     StateManager *stateManager;
     TinyGsm modem = TinyGsm(SERIALGSM);
     TinyGsmClient gsmClient = TinyGsmClient(modem);
     SSLClient gsmClientSSL = SSLClient(&gsmClient);
-    PubSubClient mqttClient = PubSubClient(MQTT_HOST, MQTT_PORT, gsmClientSSL);
+    PubSubClient mqttClient = PubSubClient(gsmClientSSL);
     std::queue<_protocol_TrackerPosition> positionBuffer;
     std::queue<_protocol_Report> reportBuffer;
-    std::mutex gsm_mutex; // everything integrating with gsm module (mqttClient, gsmClient, gsmClientSSL) must be synchronized!
+    std::recursive_mutex gsm_mutex; // everything integrating with gsm module (mqttClient, gsmClient, gsmClientSSL) must be synchronized!
     std::mutex report_buffer_mutex;
     std::mutex buffer_mutex;
 };

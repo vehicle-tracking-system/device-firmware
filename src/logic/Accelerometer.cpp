@@ -1,43 +1,73 @@
 #include "Accelerometer.h"
 
-Accelerometer::Accelerometer() {
-
+Accelerometer::Accelerometer(StateManager &stateManager) {
+    this->stateManager = &stateManager;
 }
 
 bool Accelerometer::begin() {
-    Wire.begin();
-    Wire.beginTransmission(MPU_ADDR); // Begins a transmission to the I2C slave (GY-521 board)
-    Wire.write(MPU_ADDR); // PWR_MGMT_1 register
-    Wire.write(0); // set to zero (wakes up the MPU-6050)
+    if (!Wire.begin())
+        return false;
+    Wire.beginTransmission(MPU_ADDR);
+    Wire.write(0x6B);
+    Wire.write(0);
     Wire.endTransmission(true);
+    delay(50);
     return true;
 }
 
-void
-Accelerometer::read(double *acceleration, int16_t *accelerometer_x, int16_t *accelerometer_y, int16_t *accelerometer_z,
-                    int16_t *gyro_x, int16_t *gyro_y, int16_t *gyro_z, int16_t *temperature) {
+bool Accelerometer::updateAcceleration() {
+    int16_t accelerometer_x, accelerometer_y, accelerometer_z;
     Wire.beginTransmission(MPU_ADDR);
     Wire.write(0x3B);
     Wire.endTransmission(false);
     Wire.requestFrom(MPU_ADDR, 7 * 2, true);
-    int16_t a, b, c;
-    a = Wire.read() << 8 | Wire.read(); // reading registers: 0x3B (ACCEL_XOUT_H) and 0x3C (ACCEL_XOUT_L)
-    b = Wire.read() << 8 | Wire.read(); // reading registers: 0x3D (ACCEL_YOUT_H) and 0x3E (ACCEL_YOUT_L)
-    c = Wire.read() << 8 | Wire.read(); // reading registers: 0x3F (ACCEL_ZOUT_H) and 0x40 (ACCEL_ZOUT_L)
-    *temperature = Wire.read() << 8 | Wire.read(); // reading registers: 0x41 (TEMP_OUT_H) and 0x42 (TEMP_OUT_L)
-    *gyro_x = Wire.read() << 8 | Wire.read(); // reading registers: 0x43 (GYRO_XOUT_H) and 0x44 (GYRO_XOUT_L)
-    *gyro_y = Wire.read() << 8 | Wire.read(); // reading registers: 0x45 (GYRO_YOUT_H) and 0x46 (GYRO_YOUT_L)
-    *gyro_z = Wire.read() << 8 | Wire.read(); // reading registers: 0x47 (GYRO_ZOUT_H) and 0x48 (GYRO_ZOUT_L)
-    *accelerometer_x = a;
-    *accelerometer_y = b;
-    *accelerometer_z = c;
-    *acceleration = sqrt(square(a) + square(b) + square(c));
-}
 
-double Accelerometer::square(double a) {
-    return a * a;
-}
+    accelerometer_x = Wire.read() << 8 | Wire.read();
+    accelerometer_y = Wire.read() << 8 | Wire.read();
+    accelerometer_z = Wire.read() << 8 | Wire.read();
+    Wire.read() << 8 | Wire.read();
+    Wire.read() << 8 | Wire.read();
+    Wire.read() << 8 | Wire.read();
+    Wire.read() << 8 | Wire.read();
+    if (accelerometer_x == -1){
+        ERROR_PRINT("Accelerometer x coordinates is not valid %d\n", accelerometer_x);
+        return false;
+    }
+    if (accelerometer_y == -1) {
+        ERROR_PRINT("Accelerometer y coordinates is not valid %d\n", accelerometer_y);
+        return false;
+    }
+    if (accelerometer_z == -1) {
+        ERROR_PRINT("Accelerometer z coordinates is not valid %d\n", accelerometer_z);
+        return false;
+    }
+    double acc = sqrt(
+            accelerometer_x * accelerometer_x + accelerometer_y * accelerometer_y + accelerometer_z * accelerometer_z);
+    double act = abs(this->acceleration - acc);
+    this->acceleration = acc;
 
-double Accelerometer::getAcceleration() const {
-    return acceleration;
+    DEBUG_PRINT("Acceleration: x %hd, y %hd, z %hd -- %f %f\n", accelerometer_x, accelerometer_y, accelerometer_z, acc,
+                act);
+//    stateManager->setAcc(act);
+    if (this->stateManager->moving()) {
+        if (act < MOVEMENT_THRESHOLD) {
+            if (counter > 10) {
+                this->stateManager->setMoving(false);
+                counter = 0;
+            }
+            counter++;
+        } else counter = 0;
+    }
+
+    if (!this->stateManager->moving()) {
+        if (act >= MOVEMENT_THRESHOLD) {
+            if (counter > 5) {
+                this->stateManager->setMoving(true);
+                counter = 0;
+            }
+            counter++;
+        } else counter = 0;
+    }
+
+    return true;
 }
