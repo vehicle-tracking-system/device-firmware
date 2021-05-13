@@ -50,16 +50,6 @@ static const int REPORT_FREQUENCE = POSITIONS_IN_REPORT * POSITION_FREQUENCE; //
 
 static const double MAX_DISTANCE_BETWEEN_TWO_POSITIONS = round(200 / 3.6) * POSITIONS_IN_REPORT;
 
-//static const char MQTT_HOST[] = "m.dev.jehlicka.eu";
-//static const int MQTT_PORT = 8883;
-//static const char MQTT_TOPIC[] = "sledovac-dev";
-//static const char MQTT_USERNAME[] = "tracker";
-//static const char MQTT_PASSWORD[] = "tracker";
-
-//static const char APN_HOST[] = "internet.t-mobile.cz";
-//static const char APN_USER[] = "";
-//static const char APN_PASS[] = "";
-
 static const char WIFI_SSID[] = "tracker";
 static const char WIFI_PASSWORD[] = "12345678";
 

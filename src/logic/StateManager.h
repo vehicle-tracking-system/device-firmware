@@ -103,7 +103,7 @@ private:
     float latitude = 0;
     float longitude = 0;
     float spd = 0;
-    float acceleration = 0;
+    double acceleration = 0;
     long vehicleId;
     bool error = false;
     bool reconnecting = false;

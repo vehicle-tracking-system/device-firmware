@@ -7,18 +7,6 @@ StateManager::StateManager(Preferences &preferences) {
 }
 
 bool StateManager::begin() {
-    resetCounter = preferences->getUInt("resets", 0);
-    DEBUG_PRINT("Total resets: %u\n", resetCounter);
-//    if (resetCounter >= 4) {
-//        clearConfig();
-//        return false;
-//    }
-//    preferences->putUInt("resets", resetCounter + 1);
-//    DefaultTasker.once("resetcnt", [this]() {
-//        Tasker::sleep(10000);
-//        DEBUG_PRINT("Resetting counter of resets!\n", NULL);
-//        preferences->putUInt("resets", 0);
-//    });
     generateSessionId();
     readConfig();
     return true;
@@ -178,7 +166,6 @@ bool StateManager::moving() const {
 
 void StateManager::setAcc(double acc) {
     acceleration = acc;
-    newState = true;
 }
 
 double StateManager::getAcc() {
