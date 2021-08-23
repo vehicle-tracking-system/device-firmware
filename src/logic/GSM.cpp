@@ -34,7 +34,7 @@ bool GSM::connectToGSM() {
     bool modemConnected = false;
 
     DEBUG_PRINT("Initializing modem...\n", NULL);
-    TinyGsmAutoBaud(SERIALGSM, 9600, 57600);
+    TinyGsmAutoBaud(SERIALGSM, 115200, 115200);
 //    SERIALGSM.begin(9600);
     if (!modem.init()) {
         ERROR_PRINT("Modem init failed!!!\n", NULL);
@@ -161,11 +161,14 @@ bool GSM::connectToGPS() {
     int vsat, usat;
     while (!modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy)) {
         if (this->isModemConnected()) {
-            Tasker::sleep(250);
+            String gps_raw = modem.getGPSraw();
+            DEBUG_PRINT("Visible satellites: %d\n\tUsed satellites: %d\n\tRaw: %s\n", vsat, usat, gps_raw.c_str());
+            Tasker::sleep(1500);
         } else {
             this->reconnect();
         }
     }
+    DEBUG_PRINT("\n", NULL);
     this->stateManager->setPosition(lat, lon, speed);
     DEBUG_PRINT("GPS position fixed: %f %f\n", lat, lon);
 
